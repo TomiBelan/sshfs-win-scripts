@@ -3,6 +3,8 @@
 ; https://docs.microsoft.com/en-us/windows/win32/power/wm-powerbroadcast
 ; https://docs.microsoft.com/en-us/windows/win32/power/pbt-apmsuspend
 
+TraySetIcon("shell32.dll", 43)
+
 OnMessage(0x218, myhandler)   ; 0x218 = WM_POWERBROADCAST
 
 Persistent
