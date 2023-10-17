@@ -7,6 +7,7 @@ $scriptrootslash = $PSScriptRoot.Replace("\", "/")   # shrug, blame cygwin (or m
 
 $Env:SSH_ASKPASS = $PSScriptRoot + "\askpass1.bat"
 $Env:SSH_ASKPASS_REQUIRE = "force"
+$Env:CYGWIN += " wincmdln"  # Just so that kill_ssh_now.ps1 can detect it. https://cygwin.com/cygwin-ug-net/using-cygwinenv.html
 
 #$exe = "C:\Program Files\SSHFS-Win\bin\sshfs.exe"
 $exe = "$PSScriptRoot\build_output\bin\sshfs.exe"
@@ -22,6 +23,7 @@ $argarr = @(
   "-oUserKnownHostsFile=$scriptrootslash/known_hosts",
   "-oIdentityFile=$scriptrootslash/tomi-REMOVED-id_ed25519",
   "-oPreferredAuthentications=publickey",
+  "-oGlobalKnownHostsFile=sshfs_ssh_marker",  # Set a not too useful option to a nonexistent file. Used by kill_ssh_now.ps1.
   "--VolumePrefix=/mysshfs/REMOVED",
   "tomi@REMOVED:/",
   "S:"  # no trailing comma
