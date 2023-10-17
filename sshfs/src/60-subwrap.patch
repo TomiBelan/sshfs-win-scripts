@@ -1,0 +1,530 @@
+diff --git a/sshfs.c b/sshfs.c
+index ff40c81..edf29ad 100644
+--- a/sshfs.c
++++ b/sshfs.c
+@@ -1215,6 +1215,10 @@ static int start_ssh(struct conn *conn)
+ 		if (sshfs.debug) {
+ 			int i;
+ 
++			time_t t = time(NULL);
++			char foo[200];
++			ctime_r(&t, foo);
++			fprintf(stderr, "%s: ", foo);
+ 			fprintf(stderr, "executing");
+ 			for (i = 0; i < sshfs.ssh_args.argc; i++)
+ 				fprintf(stderr, " <%s>",
+@@ -1530,6 +1534,10 @@ static int process_one_request(struct conn *conn)
+ 
+ static void close_conn(struct conn *conn)
+ {
++			time_t t = time(NULL);
++			char foo[200];
++			ctime_r(&t, foo);
++			fprintf(stderr, "%s: close_conn\n", foo);
+ 	close(conn->rfd);
+ 	if (conn->rfd != conn->wfd)
+ 		close(conn->wfd);
+@@ -3582,6 +3590,494 @@ static struct fuse_operations sshfs_oper = {
+ 		.create     = sshfs_create,
+ };
+ 
++#define SUBWRAP_DEBUG(...) DEBUG(__VA_ARGS__)
++
++#define SUBWRAP_PATHTYPE_ROOT 1
++#define SUBWRAP_PATHTYPE_TRANSLATED 2
++#define SUBWRAP_PATHTYPE_MISSING_TOPLEVEL 3
++#define SUBWRAP_PATHTYPE_MISSING_TOPLEVELSLASH 4
++#define SUBWRAP_PATHTYPE_MISSING_DEEP 5
++
++static void subwrap_resolve(const char *path, int *outresult, int *outpathtype, char **outnewpath)
++{
++	*outresult = 0;
++	*outpathtype = 0;
++	*outnewpath = NULL;
++
++	if (path == NULL) {
++		*outpathtype = SUBWRAP_PATHTYPE_TRANSLATED;
++		return;
++	}
++	if (strcmp(path, "") == 0 || strcmp(path, "/") == 0 || strcmp(path, "/.") == 0) {
++		*outpathtype = SUBWRAP_PATHTYPE_ROOT;
++		return;
++	}
++	if (path[0] != '/') {
++		*outresult = -EINVAL;
++		return;
++	}
++
++	int path_length = strlen(path);
++	int first_component_length = 0;
++	while (path[1+first_component_length] != '\0' && path[1+first_component_length] != '/') {
++		first_component_length++;
++	}
++
++	const char *mapping = "root=/:myhome=/home/tomi/:myhome2=home/tomi:tmp=tmp";
++
++	const char *m = mapping;
++	while (1) {
++		int eq = -1;
++		int l = 0;
++		while (m[l] != '\0' && m[l] != ':') {
++			if (m[l] == '=' && eq == -1) eq = l;
++			l++;
++		}
++		if (l != 0 && eq != -1 && eq == first_component_length && strncmp(m, path+1, eq) == 0) {
++			char *newpath = (char *)calloc(path_length + l + 8, 1);
++			if (!newpath) {
++				*outresult = -ENOMEM;
++				return;
++			}
++
++			int map_from = eq+1;
++			int map_to = l;
++			while (map_to != map_from && m[map_to-1] == '/') map_to--;
++			while (map_to != map_from && m[map_from] == '/') map_from++;
++
++			newpath[0] = '/';
++			int o = 1;
++			for (int i = map_from; i < map_to; i++) {
++				newpath[o++] = m[i];
++			}
++			for (int i = 1+first_component_length; path[i]; i++) {
++				if (path[i] == '/' && newpath[o-1] == '/') continue;
++				newpath[o++] = path[i];
++			}
++
++			*outpathtype = SUBWRAP_PATHTYPE_TRANSLATED;
++			*outnewpath = newpath;
++			return;
++		}
++		if (m[l] == '\0') break;
++		m += l + 1;
++	}
++
++	if (path_length == 1+first_component_length) {
++		*outpathtype = SUBWRAP_PATHTYPE_MISSING_TOPLEVEL;
++		return;
++	}
++	for (int i = 1+first_component_length; path[i]; i++) {
++		if (path[i] != '/') {
++			*outpathtype = SUBWRAP_PATHTYPE_MISSING_DEEP;
++			return;
++		}
++	}
++	*outpathtype = SUBWRAP_PATHTYPE_MISSING_TOPLEVELSLASH;
++}
++
++static int subwrap_cleanup(char *newpath, int result)
++{
++	free(newpath);
++	return result;
++}
++
++#define SUBWRAP_COMMON_BEGIN() \
++	SUBWRAP_DEBUG("%s <%s>\n", __func__, path); \
++	int result; int pathtype; char *newpath; \
++	subwrap_resolve(path, &result, &pathtype, &newpath); \
++	if (newpath) SUBWRAP_DEBUG("-->[%s]\n", newpath); \
++	if (result) return result;
++
++static void *subwrap_init(struct fuse_conn_info *conn,
++                          struct fuse_config *cfg)
++{
++	SUBWRAP_DEBUG("%s\n", __func__);
++	return sshfs.op->init(conn, cfg);
++}
++
++static int subwrap_getattr(const char *path, struct stat *stbuf,
++                           struct fuse_file_info *fi)
++{
++	SUBWRAP_COMMON_BEGIN();
++	if (pathtype == SUBWRAP_PATHTYPE_ROOT) {
++		memset(stbuf, 0, sizeof(struct stat));
++		stbuf->st_mode = S_IFDIR | 0755; // TODO 0555
++		stbuf->st_nlink = 1;
++	} else if (pathtype == SUBWRAP_PATHTYPE_TRANSLATED) {
++		result = sshfs.op->getattr(newpath, stbuf, fi);
++	} else {
++		result = -ENOENT;
++	}
++	if (sshfs.debug) {
++		if (result != 0) {
++			SUBWRAP_DEBUG("-->(e:%d)\n", result);
++		} else {
++			SUBWRAP_DEBUG("-->(m%o n%d u%d g%d r%d s%d b%d a%lld m%lld c%lld b%lld)\n",
++				(int)stbuf->st_mode, (int)stbuf->st_nlink, (int)stbuf->st_uid, (int)stbuf->st_gid,
++				(int)stbuf->st_rdev, (int)stbuf->st_size, (int)stbuf->st_blocks,
++				(long long)stbuf->st_atim.tv_sec, (long long)stbuf->st_mtim.tv_sec,
++				(long long)stbuf->st_ctim.tv_sec, (long long)stbuf->st_birthtim.tv_sec);
++		}
++	}
++	return subwrap_cleanup(newpath, result);
++}
++
++static int subwrap_access(const char *path, int mask)
++{
++	SUBWRAP_COMMON_BEGIN();
++	return subwrap_cleanup(newpath,
++		pathtype == SUBWRAP_PATHTYPE_ROOT ? (mask & W_OK ? -EACCES : 0) :
++		pathtype == SUBWRAP_PATHTYPE_TRANSLATED ? sshfs.op->access(newpath, mask) :
++		-ENOENT);
++}
++
++static int subwrap_opendir(const char *path, struct fuse_file_info *fi)
++{
++	SUBWRAP_COMMON_BEGIN();
++	if (pathtype == SUBWRAP_PATHTYPE_ROOT) {
++		fi->fh = (unsigned long)subwrap_opendir;
++		result = 0;
++	} else if (pathtype == SUBWRAP_PATHTYPE_TRANSLATED) {
++		result = sshfs.op->opendir(newpath, fi);
++	} else {
++		result = -ENOENT;
++	}
++	return subwrap_cleanup(newpath, result);
++}
++
++static int subwrap_readdir(const char *path, void *dbuf, fuse_fill_dir_t filler,
++                           off_t offset, struct fuse_file_info *fi,
++                           enum fuse_readdir_flags flags)
++{
++	SUBWRAP_COMMON_BEGIN();
++	if (fi && fi->fh == (unsigned long)subwrap_opendir) {
++		filler(dbuf, ".", NULL, 0, 0);
++		filler(dbuf, "..", NULL, 0, 0);
++		filler(dbuf, "root", NULL, 0, 0);
++		filler(dbuf, "myhome", NULL, 0, 0);
++		filler(dbuf, "myhome2", NULL, 0, 0);
++		filler(dbuf, "tmp", NULL, 0, 0);
++		// TODO
++		result = 0;
++	} else if (pathtype == SUBWRAP_PATHTYPE_TRANSLATED) {
++		result = sshfs.op->readdir(newpath, dbuf, filler, offset, fi, flags);
++	} else {
++		result = -EIO;
++	}
++	return subwrap_cleanup(newpath, result);
++}
++
++static int subwrap_releasedir(const char *path, struct fuse_file_info *fi)
++{
++	SUBWRAP_COMMON_BEGIN();
++	if (fi && fi->fh == (unsigned long)subwrap_opendir) {
++		result = 0;
++	} else if (pathtype == SUBWRAP_PATHTYPE_TRANSLATED) {
++		result = sshfs.op->releasedir(newpath, fi);
++	} else {
++		result = -EIO;
++	}
++	return subwrap_cleanup(newpath, result);
++}
++
++static int subwrap_readlink(const char *path, char *linkbuf, size_t size)
++{
++	SUBWRAP_COMMON_BEGIN();
++	// sshfs usually returns EBADMSG for non-symlinks, but EINVAL is more correct.
++	result =
++		pathtype == SUBWRAP_PATHTYPE_ROOT ? -EINVAL :
++		pathtype == SUBWRAP_PATHTYPE_TRANSLATED ? sshfs.op->readlink(newpath, linkbuf, size) :
++		-ENOENT;
++	if (result != 0 && sshfs.debug) { SUBWRAP_DEBUG("-->(e:%d)\n", result); }
++	if (result == 0 && sshfs.debug) { SUBWRAP_DEBUG("-->(%s)\n", linkbuf); }
++	return subwrap_cleanup(newpath, result);
++}
++
++static int subwrap_mknod(const char *path, mode_t mode, dev_t rdev)
++{
++	SUBWRAP_COMMON_BEGIN();
++	result =
++		pathtype == SUBWRAP_PATHTYPE_ROOT ? -EEXIST :
++		pathtype == SUBWRAP_PATHTYPE_TRANSLATED ? sshfs.op->mknod(newpath, mode, rdev) :
++		pathtype == SUBWRAP_PATHTYPE_MISSING_TOPLEVEL ? -EACCES :
++		pathtype == SUBWRAP_PATHTYPE_MISSING_TOPLEVELSLASH ? -ENOENT :
++		-ENOENT;
++	return subwrap_cleanup(newpath, result);
++}
++
++static int subwrap_mkdir(const char *path, mode_t mode)
++{
++	SUBWRAP_COMMON_BEGIN();
++	result =
++		pathtype == SUBWRAP_PATHTYPE_ROOT ? -EEXIST :
++		pathtype == SUBWRAP_PATHTYPE_TRANSLATED ? sshfs.op->mkdir(newpath, mode) :
++		pathtype == SUBWRAP_PATHTYPE_MISSING_TOPLEVEL ? -EACCES :
++		pathtype == SUBWRAP_PATHTYPE_MISSING_TOPLEVELSLASH ? -EACCES :
++		-ENOENT;
++	return subwrap_cleanup(newpath, result);
++}
++
++static int subwrap_symlink(const char *from, const char *path)
++{
++	SUBWRAP_COMMON_BEGIN();
++	result =
++		pathtype == SUBWRAP_PATHTYPE_ROOT ? -EEXIST :
++		pathtype == SUBWRAP_PATHTYPE_TRANSLATED ? sshfs.op->symlink(from, newpath) :
++		pathtype == SUBWRAP_PATHTYPE_MISSING_TOPLEVEL ? -EACCES :
++		pathtype == SUBWRAP_PATHTYPE_MISSING_TOPLEVELSLASH ? -ENOENT :
++		-ENOENT;
++	return subwrap_cleanup(newpath, result);
++}
++
++static int subwrap_unlink(const char *path)
++{
++	SUBWRAP_COMMON_BEGIN();
++	result =
++		pathtype == SUBWRAP_PATHTYPE_ROOT ? -EACCES :
++		pathtype == SUBWRAP_PATHTYPE_TRANSLATED ? sshfs.op->unlink(newpath) :
++		-ENOENT;
++	return subwrap_cleanup(newpath, result);
++}
++
++static int subwrap_rmdir(const char *path)
++{
++	// Let's just assume the mapped paths themselves will never be removed.
++	SUBWRAP_COMMON_BEGIN();
++	result =
++		pathtype == SUBWRAP_PATHTYPE_ROOT ? -EACCES :
++		pathtype == SUBWRAP_PATHTYPE_TRANSLATED ? sshfs.op->rmdir(newpath) :
++		-ENOENT;
++	return subwrap_cleanup(newpath, result);
++}
++
++static int subwrap_rename(const char *from, const char *to, unsigned int flags)
++{
++	SUBWRAP_DEBUG("%s <%s> <%s>\n", __func__, from, to);
++	int result; int fromtype; int totype; char *newfrom; char *newto;
++	subwrap_resolve(from, &result, &fromtype, &newfrom);
++	if (result) return result;
++	subwrap_resolve(to, &result, &totype, &newto);
++	if (result) { free(newfrom); return result; }
++	if (newfrom && newto) SUBWRAP_DEBUG("-->[%s] [%s]\n", newfrom, newto);
++
++	result =
++		fromtype == SUBWRAP_PATHTYPE_ROOT || totype == SUBWRAP_PATHTYPE_ROOT ? -EBUSY :
++		fromtype != SUBWRAP_PATHTYPE_TRANSLATED ? -ENOENT :
++		totype == SUBWRAP_PATHTYPE_TRANSLATED ? sshfs.op->rename(newfrom, newto, flags) :
++		totype == SUBWRAP_PATHTYPE_MISSING_TOPLEVEL ? -EACCES :
++		totype == SUBWRAP_PATHTYPE_MISSING_TOPLEVELSLASH ? -ENOENT :
++		-ENOENT;
++
++	free(newfrom);
++	free(newto);
++	return result;
++}
++
++static int subwrap_link(const char *from, const char *to)
++{
++	SUBWRAP_DEBUG("%s <%s> <%s>\n", __func__, from, to);
++	int result; int fromtype; int totype; char *newfrom; char *newto;
++	subwrap_resolve(from, &result, &fromtype, &newfrom);
++	if (result) return result;
++	subwrap_resolve(to, &result, &totype, &newto);
++	if (result) { free(newfrom); return result; }
++	if (newfrom && newto) SUBWRAP_DEBUG("-->[%s] [%s]\n", newfrom, newto);
++
++	result =
++		fromtype == SUBWRAP_PATHTYPE_ROOT || totype == SUBWRAP_PATHTYPE_ROOT ? -EBUSY :
++		fromtype != SUBWRAP_PATHTYPE_TRANSLATED ? -ENOENT :
++		totype == SUBWRAP_PATHTYPE_TRANSLATED ? sshfs.op->link(newfrom, newto) :
++		totype == SUBWRAP_PATHTYPE_MISSING_TOPLEVEL ? -EACCES :
++		totype == SUBWRAP_PATHTYPE_MISSING_TOPLEVELSLASH ? -ENOENT :
++		-ENOENT;
++
++	free(newfrom);
++	free(newto);
++	return result;
++}
++
++static int subwrap_chmod(const char *path, mode_t mode,
++                         struct fuse_file_info *fi)
++{
++	SUBWRAP_COMMON_BEGIN();
++	result =
++		pathtype == SUBWRAP_PATHTYPE_ROOT ? -EACCES :
++		pathtype == SUBWRAP_PATHTYPE_TRANSLATED ? sshfs.op->chmod(newpath, mode, fi) :
++		-ENOENT;
++	return subwrap_cleanup(newpath, result);
++}
++
++static int subwrap_chown(const char *path, uid_t uid, gid_t gid,
++                         struct fuse_file_info *fi)
++{
++	SUBWRAP_COMMON_BEGIN();
++	result =
++		pathtype == SUBWRAP_PATHTYPE_ROOT ? -EACCES :
++		pathtype == SUBWRAP_PATHTYPE_TRANSLATED ? sshfs.op->chown(newpath, uid, gid, fi) :
++		-ENOENT;
++	return subwrap_cleanup(newpath, result);
++}
++
++static int subwrap_truncate(const char *path, off_t size,
++                            struct fuse_file_info *fi)
++{
++	SUBWRAP_COMMON_BEGIN();
++	result =
++		pathtype == SUBWRAP_PATHTYPE_ROOT ? -EACCES :
++		pathtype == SUBWRAP_PATHTYPE_TRANSLATED ? sshfs.op->truncate(newpath, size, fi) :
++		-ENOENT;
++	return subwrap_cleanup(newpath, result);
++}
++
++static int subwrap_utimens(const char *path, const struct timespec tv[2],
++                           struct fuse_file_info *fi)
++{
++	SUBWRAP_COMMON_BEGIN();
++	result =
++		pathtype == SUBWRAP_PATHTYPE_ROOT ? 0 :
++		pathtype == SUBWRAP_PATHTYPE_TRANSLATED ? sshfs.op->utimens(newpath, tv, fi) :
++		-ENOENT;
++	return subwrap_cleanup(newpath, result);
++}
++
++static int subwrap_open(const char *path, struct fuse_file_info *fi)
++{
++	SUBWRAP_COMMON_BEGIN();
++	result =
++		pathtype == SUBWRAP_PATHTYPE_ROOT ? -EISDIR :
++		pathtype == SUBWRAP_PATHTYPE_TRANSLATED ? sshfs.op->open(newpath, fi) :
++		pathtype == SUBWRAP_PATHTYPE_MISSING_TOPLEVEL && (fi->flags & O_CREAT) ? -EACCES :
++		pathtype == SUBWRAP_PATHTYPE_MISSING_TOPLEVELSLASH && (fi->flags & O_CREAT) ? -EISDIR :
++		-ENOENT;
++	SUBWRAP_DEBUG("-->open result %d\n", result);
++	return subwrap_cleanup(newpath, result);
++}
++
++static int subwrap_flush(const char *path, struct fuse_file_info *fi)
++{
++	SUBWRAP_COMMON_BEGIN();
++	result = pathtype != SUBWRAP_PATHTYPE_TRANSLATED ? -EIO : sshfs.op->flush(newpath, fi);
++	return subwrap_cleanup(newpath, result);
++}
++
++static int subwrap_fsync(const char *path, int isdatasync,
++                         struct fuse_file_info *fi)
++{
++	SUBWRAP_COMMON_BEGIN();
++	result = pathtype != SUBWRAP_PATHTYPE_TRANSLATED ? -EIO : sshfs.op->fsync(newpath, isdatasync, fi);
++	return subwrap_cleanup(newpath, result);
++}
++
++static int subwrap_release(const char *path, struct fuse_file_info *fi)
++{
++	SUBWRAP_COMMON_BEGIN();
++	result = pathtype != SUBWRAP_PATHTYPE_TRANSLATED ? -EIO : sshfs.op->release(newpath, fi);
++	return subwrap_cleanup(newpath, result);
++}
++
++static int subwrap_read(const char *path, char *rbuf, size_t size, off_t offset,
++                        struct fuse_file_info *fi)
++{
++	SUBWRAP_COMMON_BEGIN();
++	result = pathtype != SUBWRAP_PATHTYPE_TRANSLATED ? -EIO : sshfs.op->read(newpath, rbuf, size, offset, fi);
++	return subwrap_cleanup(newpath, result);
++}
++
++static int subwrap_write(const char *path, const char *wbuf, size_t size,
++                         off_t offset, struct fuse_file_info *fi)
++{
++	SUBWRAP_COMMON_BEGIN();
++	result = pathtype != SUBWRAP_PATHTYPE_TRANSLATED ? -EIO : sshfs.op->write(newpath, wbuf, size, offset, fi);
++	return subwrap_cleanup(newpath, result);
++}
++
++static int subwrap_statfs(const char *path, struct statvfs *buf)
++{
++	SUBWRAP_COMMON_BEGIN();
++	int active_connections = 0;
++	for (int i = 0; i < sshfs.max_conns; i++) {
++		if (sshfs.conns[i].rfd >= 0) active_connections++;
++	}
++	if (active_connections == 0) {
++		// Copied from sshfs_statfs.
++		buf->f_namemax = 255;
++		buf->f_bsize = sshfs.blksize;
++		/*
++		 * df seems to use f_bsize instead of f_frsize, so make them
++		 * the same
++		 */
++		buf->f_frsize = buf->f_bsize;
++		buf->f_blocks = buf->f_bfree =  buf->f_bavail =
++			1000ULL * 1024 * 1024 * 1024 / buf->f_frsize;
++		buf->f_files = buf->f_ffree = 1000000000;
++	} else {
++		result =
++			pathtype == SUBWRAP_PATHTYPE_ROOT ? sshfs.op->statfs("/", buf) :
++			pathtype == SUBWRAP_PATHTYPE_TRANSLATED ? sshfs.op->statfs(newpath, buf) :
++			-ENOENT;
++	}
++	if (result != 0 && sshfs.debug) SUBWRAP_DEBUG("-->(e:%d)\n", result);
++	if (result == 0 && sshfs.debug) {
++		SUBWRAP_DEBUG("-->(%lld %lld %lld %lld %lld %lld %lld %lld %lld %lld %lld)\n",
++			(long long)buf->f_bsize,
++			(long long)buf->f_frsize,
++			(long long)buf->f_blocks,
++			(long long)buf->f_bfree,
++			(long long)buf->f_bavail,
++			(long long)buf->f_files,
++			(long long)buf->f_ffree,
++			(long long)buf->f_favail,
++			(long long)buf->f_fsid,
++			(long long)buf->f_flag,
++			(long long)buf->f_namemax);
++	}
++	return result;
++}
++
++static int subwrap_create(const char *path, mode_t mode,
++                          struct fuse_file_info *fi)
++{
++	SUBWRAP_COMMON_BEGIN();
++	result =
++		pathtype == SUBWRAP_PATHTYPE_ROOT ? -EEXIST :
++		pathtype == SUBWRAP_PATHTYPE_TRANSLATED ? sshfs.op->create(newpath, mode, fi) :
++		pathtype == SUBWRAP_PATHTYPE_MISSING_TOPLEVEL ? -EACCES :
++		pathtype == SUBWRAP_PATHTYPE_MISSING_TOPLEVELSLASH ? -ENOENT :
++		-ENOENT;
++	SUBWRAP_DEBUG("-->create result %d\n", result);
++	return subwrap_cleanup(newpath, result);
++}
++
++static struct fuse_operations subwrap_oper = {
++		.init       = subwrap_init,
++		.getattr    = subwrap_getattr,
++		.access     = subwrap_access,
++		.opendir    = subwrap_opendir,
++		.readdir    = subwrap_readdir,
++		.releasedir = subwrap_releasedir,
++		.readlink   = subwrap_readlink,
++		.mknod      = subwrap_mknod,
++		.mkdir      = subwrap_mkdir,
++		.symlink    = subwrap_symlink,
++		.unlink     = subwrap_unlink,
++		.rmdir      = subwrap_rmdir,
++		.rename     = subwrap_rename,
++		.link       = subwrap_link,
++		.chmod      = subwrap_chmod,
++		.chown      = subwrap_chown,
++		.truncate   = subwrap_truncate,
++		.utimens    = subwrap_utimens,
++		.open       = subwrap_open,
++		.flush      = subwrap_flush,
++		.fsync      = subwrap_fsync,
++		.release    = subwrap_release,
++		.read       = subwrap_read,
++		.write      = subwrap_write,
++		.statfs     = subwrap_statfs,
++		.create     = subwrap_create,
++};
++
+ static void usage(const char *progname)
+ {
+ 	printf(
+@@ -4354,7 +4850,7 @@ int main(int argc, char *argv[])
+ 		sshfs.op = cache_wrap(&sshfs_oper);
+ 	else
+ 		sshfs.op = &sshfs_oper;
+-	fuse = fuse_new(&args, sshfs.op,
++	fuse = fuse_new(&args, &subwrap_oper,
+ 			sizeof(struct fuse_operations), NULL);
+ 	if(fuse == NULL)
+ 		exit(1);

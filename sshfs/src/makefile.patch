@@ -1,0 +1,52 @@
+diff --git a/Makefile b/Makefile
+index 5c0b7fc..a387f28 100644
+--- a/Makefile
++++ b/Makefile
+@@ -13,8 +13,8 @@ endif
+ CertIssuer = "DigiCert"
+ CrossCert = "DigiCert High Assurance EV Root CA.crt"
+ 
+-PrjDir	= $(shell pwd)
+-BldDir	= .build/$(MyArch)
++PrjDir	= .
++BldDir	= .build
+ DistDir = $(BldDir)/dist
+ SrcDir	= $(BldDir)/src
+ RootDir	= $(BldDir)/root
+@@ -22,9 +22,8 @@ WixDir	= $(BldDir)/wix
+ Status	= $(BldDir)/status
+ BinExtra= ssh #bash ls mount
+ 
+-export PATH := $(shell cygpath -au "$$WIX")/bin:$(PATH)
+ 
+-goal: $(Status) $(Status)/done
++goal: $(Status) $(Status)/sshfs-win
+ 
+ $(Status):
+ 	mkdir -p $(Status)
+@@ -89,11 +88,11 @@ $(Status)/root: $(Status)/make
+ 	mkdir -p $(RootDir)/{bin,dev/{mqueue,shm},etc}
+ 	(cygcheck $(SrcDir)/sshfs/build/sshfs; for f in $(BinExtra); do cygcheck /usr/bin/$$f; done) |\
+ 		tr -d '\r' | tr '\\' / | xargs cygpath -au | grep '^/usr/bin/' | sort | uniq |\
+-		while read f; do cp $$f $(RootDir)/bin; done
+-	cp $(SrcDir)/sshfs/build/sshfs $(RootDir)/bin
++		while read f; do cp -p $$f $(RootDir)/bin; done
++	cp -p $(SrcDir)/sshfs/build/sshfs $(RootDir)/bin
+ 	strip $(RootDir)/bin/sshfs
+-	for f in $(BinExtra); do cp /usr/bin/$$f $(RootDir)/bin; done
+-	cp -R $(PrjDir)/etc $(RootDir)
++	for f in $(BinExtra); do cp -p /usr/bin/$$f $(RootDir)/bin; done
++	cp -p -R $(PrjDir)/etc $(RootDir)
+ 	touch $(Status)/root
+ 
+ $(Status)/make: $(Status)/config
+@@ -106,7 +105,8 @@ $(Status)/config: $(Status)/patch
+ 	touch $(Status)/config
+ 
+ $(Status)/patch: $(Status)/clone
+-	cd $(SrcDir)/sshfs && for f in $(PrjDir)/patches/*.patch; do patch --binary -p1 <$$f; done
++	cp -r patches $(SrcDir)
++	cd $(SrcDir)/sshfs; git apply --verbose ../patches/*.patch
+ 	touch $(Status)/patch
+ 
+ $(Status)/clone:
