@@ -25,6 +25,7 @@ $argarr = @(
   "-oPreferredAuthentications=publickey",
   "-oGlobalKnownHostsFile=sshfs_ssh_marker",  # Set a not too useful option to a nonexistent file. Used by kill_ssh_now.ps1.
   "--VolumePrefix=/mysshfs/REMOVED",
+  "-osubwrap_paths=myhome=/home/tomi:root=/",
   "tomi@REMOVED:/",
   "S:"  # no trailing comma
 )

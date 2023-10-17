@@ -1,0 +1,28 @@
+diff --git a/sshfs.c b/sshfs.c
+index cf615bc..339395c 100644
+--- a/sshfs.c
++++ b/sshfs.c
+@@ -1222,6 +1222,11 @@ static int start_ssh(struct conn *conn)
+ 		if (sshfs.debug) {
+ 			int i;
+ 
++			time_t now = time(NULL);
++			char nowstr[200];
++			ctime_r(&now, nowstr);
++			*strchrnul(nowstr, '\n') = '\0';
++			fprintf(stderr, "%s: ", nowstr);
+ 			fprintf(stderr, "executing");
+ 			for (i = 0; i < sshfs.ssh_args.argc; i++)
+ 				fprintf(stderr, " <%s>",
+@@ -1535,6 +1540,11 @@ static int process_one_request(struct conn *conn)
+ 
+ static void close_conn(struct conn *conn)
+ {
++	time_t now = time(NULL);
++	char nowstr[200];
++	ctime_r(&now, nowstr);
++	*strchrnul(nowstr, '\n') = '\0';
++	DEBUG("%s: close_conn\n", nowstr);
+ 	close(conn->rfd);
+ 	if (conn->rfd != conn->wfd)
+ 		close(conn->wfd);
