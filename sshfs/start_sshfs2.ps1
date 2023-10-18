@@ -8,16 +8,10 @@ $MyMountPoint = "S:"
 $MyVolumePrefix = "/mysshfs/REMOVED"
 $MyUserHostPath = "tomi@REMOVED:/"
 $MySubwrapPaths = "myhome=/home/tomi:root=/"
-$MyIdentityFile = "tomi-REMOVED-id_ed25519"
 # ---------------------
 
-$scriptrootslash = $PSScriptRoot.Replace("\", "/")   # shrug, blame cygwin (or maybe winfsp option parser)
+$windir = $Env:WINDIR.Replace("\", "/")   # shrug, blame cygwin (or maybe winfsp option parser)
 
-$Env:SSH_ASKPASS = $PSScriptRoot + "\askpass1.bat"
-$Env:SSH_ASKPASS_REQUIRE = "force"
-$Env:CYGWIN += " wincmdln"  # Just so that kill_ssh_now.ps1 can detect it. https://cygwin.com/cygwin-ug-net/using-cygwinenv.html
-
-#$exe = "C:\Program Files\SSHFS-Win\bin\sshfs.exe"
 $exe = "$PSScriptRoot\build_output\bin\sshfs.exe"
 
 $argarr = @(
@@ -57,19 +51,13 @@ $argarr = @(
   "-oidmap=user",
 
   # SSHFS option. The ssh program to use.
-  "-ossh_command=/usr/bin/ssh",
+  "-ossh_command=$windir/System32/OpenSSH/ssh.exe",
 
   # SSHFS option. Don't start ssh immediately, wait until it's needed.
   "-odelay_connect",
 
   # SSHFS option. Reconnect if ssh dies or disconnects. With delay_connect, wait until it's needed.
   "-oreconnect",
-
-  # SSH option. The known hosts file.
-  "-oUserKnownHostsFile=$scriptrootslash/known_hosts",
-
-  # SSH option. The private key file.
-  "-oIdentityFile=$scriptrootslash/$MyIdentityFile",
 
   # SSH option. Use only public key authentication.
   "-oPreferredAuthentications=publickey",
@@ -101,9 +89,6 @@ if ($Verbose) {
 $argstr = ($argarr | % { '"' + $_ + '"' }) -Join " "
 
 if ($Verbose) {
-  "args: $args"
-  "original root: $PSScriptRoot"
-  "replaced root: $scriptrootslash"
   "exe: $exe"
   "argstr: $argstr"
   "waitless: $Waitless"

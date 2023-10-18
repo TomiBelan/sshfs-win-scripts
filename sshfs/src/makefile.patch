@@ -1,8 +1,8 @@
 diff --git a/Makefile b/Makefile
-index 5c0b7fc..a387f28 100644
+index 5c0b7fc..cef1585 100644
 --- a/Makefile
 +++ b/Makefile
-@@ -13,8 +13,8 @@ endif
+@@ -13,18 +13,17 @@ endif
  CertIssuer = "DigiCert"
  CrossCert = "DigiCert High Assurance EV Root CA.crt"
  
@@ -13,9 +13,10 @@ index 5c0b7fc..a387f28 100644
  DistDir = $(BldDir)/dist
  SrcDir	= $(BldDir)/src
  RootDir	= $(BldDir)/root
-@@ -22,9 +22,8 @@ WixDir	= $(BldDir)/wix
+ WixDir	= $(BldDir)/wix
  Status	= $(BldDir)/status
- BinExtra= ssh #bash ls mount
+-BinExtra= ssh #bash ls mount
++BinExtra=
  
 -export PATH := $(shell cygpath -au "$$WIX")/bin:$(PATH)
  
