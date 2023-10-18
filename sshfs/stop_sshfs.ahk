@@ -32,17 +32,6 @@ if (sshfsPID = 0) {
   return
 }
 
-;DetectHiddenWindows(true)
-;sshfsList := WinGetList("ahk_exe " sshfsPath)
-;if (sshfsList.Length == 0) {
-;  MsgBox("sshfs (" sshfsPath ") is not running")
-;  return
-;}
-;
-;sshfsPID := WinGetPID("ahk_id " sshfsList[1])
-;
-;VerboseMsgBox("found " (sshfsList.Length) "windows, going to kill PID " sshfsPID)
-
 if (DllCall("FreeConsole") == 0) {
   MsgBox("FreeConsole failed with " A_LastError)
   return
