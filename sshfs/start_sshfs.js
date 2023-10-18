@@ -1,3 +1,6 @@
+// This script runs start_sshfs2.ps1 in the background (no visible window).
+// It is usually started by a shortcut in the user's Startup folder. It can also be started manually.
+
 var s = WScript.CreateObject("WScript.Shell");
 
 var scriptdir = WScript.ScriptFullName.replace(/[^/\\]*$/, "");

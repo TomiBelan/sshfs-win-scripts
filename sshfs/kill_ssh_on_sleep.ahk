@@ -1,5 +1,9 @@
 #Requires AutoHotkey v2.0
 
+; This script notices when the computer is about to sleep and hibernate, and closes the connection by running kill_ssh_now.ps1.
+; It is usually started by a shortcut in the user's Startup folder. It can also be started manually.
+
+; More info:
 ; https://docs.microsoft.com/en-us/windows/win32/power/wm-powerbroadcast
 ; https://docs.microsoft.com/en-us/windows/win32/power/pbt-apmsuspend
 

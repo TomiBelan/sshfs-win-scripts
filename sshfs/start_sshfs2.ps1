@@ -1,3 +1,6 @@
+# This script starts sshfs. It is usually called by start_sshfs.js.
+# It can also be started manually: powershell -ExecutionPolicy Bypass .\start_sshfs2.ps1 -Verbose
+
 param (
   [switch]$Waitless = $false,
   [switch]$Verbose = $false
