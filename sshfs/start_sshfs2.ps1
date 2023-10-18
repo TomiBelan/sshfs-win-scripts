@@ -3,6 +3,14 @@ param (
   [switch]$Verbose = $false
 )
 
+# ----- my config -----
+$MyMountPoint = "S:"
+$MyVolumePrefix = "/mysshfs/REMOVED"
+$MyUserHostPath = "tomi@REMOVED:/"
+$MySubwrapPaths = "myhome=/home/tomi:root=/"
+$MyIdentityFile = "tomi-REMOVED-id_ed25519"
+# ---------------------
+
 $scriptrootslash = $PSScriptRoot.Replace("\", "/")   # shrug, blame cygwin (or maybe winfsp option parser)
 
 $Env:SSH_ASKPASS = $PSScriptRoot + "\askpass1.bat"
@@ -61,7 +69,7 @@ $argarr = @(
   "-oUserKnownHostsFile=$scriptrootslash/known_hosts",
 
   # SSH option. The private key file.
-  "-oIdentityFile=$scriptrootslash/tomi-REMOVED-id_ed25519",
+  "-oIdentityFile=$scriptrootslash/$MyIdentityFile",
 
   # SSH option. Use only public key authentication.
   "-oPreferredAuthentications=publickey",
@@ -72,13 +80,13 @@ $argarr = @(
   # WinFsp option. It should hopefully mount it as a network drive instead of a fixed drive.
   # For example in rclone, AFAICT the only effect of the --network-mode option is to enable the --VolumePrefix option.
   # https://rclone.org/commands/rclone_mount/#mounting-modes-on-windows
-  "--VolumePrefix=/mysshfs/REMOVED",
+  "--VolumePrefix=$MyVolumePrefix",
 
   # Custom SSHFS option. Set the list of top-level directories and which paths they map to.
-  "-osubwrap_paths=myhome=/home/tomi:root=/",
+  "-osubwrap_paths=$MySubwrapPaths",
 
-  "tomi@REMOVED:/",
-  "S:"  # no trailing comma
+  $MyUserHostPath,
+  $MyMountPoint  # no trailing comma
 )
 
 if ($Verbose) {
