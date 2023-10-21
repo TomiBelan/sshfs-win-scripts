@@ -8,9 +8,9 @@ param (
 
 # ----- my config -----
 $MyMountPoint = "S:"
-$MyVolumePrefix = "/mysshfs/REMOVED"
-$MyUserHostPath = "tomi@REMOVED:/"
-$MySubwrapPaths = "myhome=/home/tomi:root=/"
+$MyVolumePrefix = "/mysshfs/someserver"
+$MyUserHostPath = "someusername@someserver.example.com:/"
+$MySubwrapPaths = "myhome=/home/someusername:root=/"
 # ---------------------
 
 $windir = $Env:WINDIR.Replace("\", "/")   # shrug, blame cygwin (or maybe winfsp option parser)
